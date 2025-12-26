@@ -1,7 +1,7 @@
 // api/download.js - Vercel Serverless Function
 // Deploy this to Vercel and get your API endpoint
 
-import ytdl from 'ytdl-core';
+import ytdl from '@distube/ytdl-core';
 
 export default async function handler(req, res) {
   // Enable CORS
