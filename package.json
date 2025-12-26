@@ -2,12 +2,11 @@
   "name": "video-downloader-api",
   "version": "1.0.0",
   "description": "Video downloader API for YouTube and Twitter",
-  "main": "api/download.js",
+  "type": "module",
   "dependencies": {
-    "ytdl-core": "^4.11.5",
-    "axios": "^1.6.2"
+    "ytdl-core": "^4.11.5"
   },
   "engines": {
-    "node": "24.x"
+    "node": "18.x"
   }
 }
