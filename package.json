@@ -7,6 +7,6 @@
     "ytdl-core": "^4.11.5"
   },
   "engines": {
-    "node": "24.x"
+    "node": "20.x"
   }
 }
