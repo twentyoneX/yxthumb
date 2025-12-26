@@ -1,41 +1,86 @@
 // api/download.js
 export default async function handler(req, res) {
+  // CORS Headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') return res.status(200).end();
+
   const { url } = req.query;
 
   if (!url) return res.status(400).json({ error: 'URL required' });
 
+  // Extract Video ID helper
+  const getVideoId = (link) => {
+    const regex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
+    const match = link.match(regex);
+    return match ? match[1] : null;
+  };
+
+  const videoId = getVideoId(url);
+  if (!videoId) return res.status(400).json({ error: 'Invalid YouTube URL' });
+
   try {
-    // We send the URL to Cobalt's public API
-    const response = await fetch('https://api.cobalt.tools/api/json', {
-      method: 'POST',
+    const options = {
+      method: 'GET',
       headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        url: url,
-        vCodec: 'h264',
-        vQuality: '720',
-        aFormat: 'mp3',
-        filenamePattern: 'basic'
-      })
-    });
+        'x-rapidapi-key': process.env.bc540251cfmsh72e2e3d5e14e6b8p1a0d80jsnedd4da3830d7,
+        'x-rapidapi-host': 'youtube-media-downloader.p.rapidapi.com'
+      }
+    };
+
+    // We ask RapidAPI for the video details
+    const response = await fetch(`https://youtube-media-downloader.p.rapidapi.com/v2/video/details?videoId=${videoId}`, options);
+    
+    if (!response.ok) {
+        throw new Error(`RapidAPI Error: ${response.status}`);
+    }
 
     const data = await response.json();
 
-    if (data.status === 'error') {
-       throw new Error(data.text);
+    // Map RapidAPI response to your Frontend's expected format
+    // Note: The API returns data.videos (array) and data.audios (array)
+    // We combine them for your frontend
+    const formats = [];
+    
+    if (data.videos && data.videos.items) {
+        data.videos.items.forEach(v => {
+            formats.push({
+                quality: v.quality,
+                url: v.url,
+                mimeType: 'video/mp4',
+                filesize: v.sizeText,
+                container: 'mp4',
+                hasAudio: v.hasAudio
+            });
+        });
     }
 
-    // Cobalt returns a direct download link (data.url)
+    if (data.audios && data.audios.items) {
+        data.audios.items.forEach(a => {
+            formats.push({
+                quality: 'Audio Only',
+                url: a.url,
+                mimeType: 'audio/mp3',
+                filesize: a.sizeText,
+                container: 'mp3'
+            });
+        });
+    }
+
     return res.status(200).json({
       success: true,
-      download_url: data.url, 
-      // Note: Cobalt doesn't always provide titles/thumbnails in the basic JSON 
-      // You might need a separate call (like the regex one I showed earlier) for thumbnails
+      title: data.title,
+      thumbnail: data.thumbnails ? data.thumbnails[data.thumbnails.length - 1].url : '',
+      formats: formats
     });
 
   } catch (error) {
-    return res.status(500).json({ error: error.message });
+    console.error(error);
+    return res.status(500).json({ 
+        success: false, 
+        error: error.message 
+    });
   }
 }
