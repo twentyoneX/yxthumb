@@ -4,9 +4,7 @@
   "description": "Video downloader API for YouTube and Twitter",
   "type": "module",
   "dependencies": {
+    "express": "^4.21.0",
     "ytdl-core": "^4.11.5"
-  },
-  "engines": {
-    "node": "20.x"
   }
 }
