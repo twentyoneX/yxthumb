@@ -1,10 +1,8 @@
-// api/download.js - Vercel Serverless Function
-// Deploy this to Vercel and get your API endpoint
-
+// api/download.js
 import ytdl from '@distube/ytdl-core';
 
 export default async function handler(req, res) {
-  // Enable CORS
+  // 1. Enable CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -21,7 +19,7 @@ export default async function handler(req, res) {
 
   try {
     if (type === 'youtube') {
-      // Validate YouTube URL
+      // 2. Validate YouTube URL
       if (!ytdl.validateURL(url)) {
         return res.status(400).json({ 
           success: false,
@@ -29,10 +27,21 @@ export default async function handler(req, res) {
         });
       }
 
-      // Get video info
-      const info = await ytdl.getInfo(url);
+      // 3. FIX: Create Agent with Cookies to bypass "Sign in" & 410 errors
+      // You must set YOUTUBE_COOKIES in Vercel Environment Variables
+      let agent;
+      try {
+        const cookies = process.env.YOUTUBE_COOKIES ? JSON.parse(process.env.YOUTUBE_COOKIES) : [];
+        agent = ytdl.createAgent(cookies);
+      } catch (err) {
+        console.warn("Cookie parsing failed, attempting without cookies...", err);
+        agent = undefined;
+      }
+
+      // 4. Pass the agent to getInfo
+      const info = await ytdl.getInfo(url, { agent });
       
-      // Filter formats that have both video and audio
+      // Filter formats (Video + Audio)
       const formats = ytdl.filterFormats(info.formats, 'videoandaudio')
         .map(format => ({
           quality: format.qualityLabel || format.quality,
@@ -41,18 +50,21 @@ export default async function handler(req, res) {
           filesize: format.contentLength,
           container: format.container
         }))
-        .filter(format => format.quality) // Only include formats with quality labels
-        .slice(0, 5); // Limit to top 5 formats
+        .filter(format => format.quality)
+        .slice(0, 5);
+
+      // Get highest quality thumbnail safely
+      const thumbnails = info.videoDetails.thumbnails;
+      const thumbnail = thumbnails.length > 0 ? thumbnails[thumbnails.length - 1].url : '';
 
       return res.status(200).json({
         success: true,
         title: info.videoDetails.title,
-        thumbnail: info.videoDetails.thumbnails[info.videoDetails.thumbnails.length - 1].url,
+        thumbnail: thumbnail,
         formats: formats
       });
 
     } else if (type === 'twitter') {
-      // Twitter requires different handling
       return res.status(200).json({
         success: false,
         message: 'Twitter downloads require additional setup. Use redirect method instead.',
