@@ -25,7 +25,7 @@ export default async function handler(req, res) {
     const options = {
       method: 'GET',
       headers: {
-        'x-rapidapi-key': process.env.bc540251cfmsh72e2e3d5e14e6b8p1a0d80jsnedd4da3830d7,
+        'x-rapidapi-key': process.env.RAPIDAPI_KEY,
         'x-rapidapi-host': 'youtube-media-downloader.p.rapidapi.com'
       }
     };
