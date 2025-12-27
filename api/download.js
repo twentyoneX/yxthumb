@@ -1,6 +1,5 @@
 // api/download.js
 export default async function handler(req, res) {
-  // CORS Headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -19,43 +18,38 @@ export default async function handler(req, res) {
       }
     };
 
-    // SWITCH STRATEGY: Use the main endpoint with the FULL URL.
-    // This is usually safer than extracting IDs manually.
+    // 1. Use the UNIVERSAL endpoint (No ID extraction needed)
+    // This often bypasses specific YouTube filters because it looks like a generic request
     const apiUrl = `https://all-media-downloader4.p.rapidapi.com/?url=${encodeURIComponent(url)}`;
     
-    console.log("Calling API:", apiUrl); 
-    
+    console.log("Requesting:", apiUrl);
     const response = await fetch(apiUrl, options);
     
-    // Check if RapidAPI rejected us (e.g., Bad Key or Quota Limit)
     if (!response.ok) {
-       const errText = await response.text();
-       console.error("RapidAPI Error:", response.status, errText);
-       throw new Error(`RapidAPI Error: ${response.status} (Check Vercel Logs)`);
+       const err = await response.text();
+       throw new Error(`RapidAPI Error: ${response.status} - ${err}`);
     }
 
     const data = await response.json();
-    console.log("API Data:", JSON.stringify(data)); // See this in Vercel Logs
+    console.log("API Response:", JSON.stringify(data));
 
-    // --- PARSING ---
-    // This API usually puts the link in 'download_url', 'url', or 'data.url'
+    // 2. Universal Parser
     let formats = [];
     
+    // Check all possible locations for links
     const directLink = data.download_url || data.url || (data.data ? data.data.url : null);
-    const formatList = data.formats || (data.data ? data.data.formats : []);
+    const list = data.formats || data.links || (data.data ? data.data.formats : []);
 
-    if (Array.isArray(formatList) && formatList.length > 0) {
-        // If they give us a list of qualities
-        formats = formatList.map(f => ({
+    if (Array.isArray(list) && list.length > 0) {
+        formats = list.map(f => ({
             quality: f.quality || f.format_note || 'Video',
             url: f.url,
             mimeType: 'video/mp4',
             container: 'mp4'
         }));
     } else if (directLink) {
-        // If they just give us one link
         formats.push({
-            quality: 'High Quality',
+            quality: 'High',
             url: directLink,
             mimeType: 'video/mp4',
             container: 'mp4'
@@ -63,10 +57,11 @@ export default async function handler(req, res) {
     }
 
     if (formats.length === 0) {
+        // If we get here, the API returned success but gave no links (Copyright blocked)
         return res.status(500).json({ 
             success: false, 
-            error: "No download link returned by API", 
-            debug: data 
+            error: "This video is protected (Copyright) or unavailable.",
+            debug: data
         });
     }
 
