@@ -1,86 +1,80 @@
 // api/download.js
+import ytdl from '@distube/ytdl-core';
+
 export default async function handler(req, res) {
-  // CORS Headers
+  // 1. CORS Headers (Allows your frontend to talk to this backend)
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  if (req.method === 'OPTIONS') return res.status(200).end();
+  // Handle preflight check
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
 
   const { url } = req.query;
 
-  if (!url) return res.status(400).json({ error: 'URL required' });
-
-  // Extract Video ID helper
-  const getVideoId = (link) => {
-    const regex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
-    const match = link.match(regex);
-    return match ? match[1] : null;
-  };
-
-  const videoId = getVideoId(url);
-  if (!videoId) return res.status(400).json({ error: 'Invalid YouTube URL' });
+  if (!url) {
+    return res.status(400).json({ error: 'URL parameter is required' });
+  }
 
   try {
-    const options = {
-      method: 'GET',
-      headers: {
-        'x-rapidapi-key': process.env.RAPIDAPI_KEY,
-        'x-rapidapi-host': 'youtube-media-downloader.p.rapidapi.com'
-      }
-    };
+    // 2. Load the Cookies you saved in Vercel
+    let agent;
+    try {
+        const cookieString = process.env.YOUTUBE_COOKIES;
+        if (!cookieString) {
+            console.warn("No cookies found in environment variables.");
+        } else {
+            const cookies = JSON.parse(cookieString);
+            // Create the "Agent" using your Visitor Cookies
+            agent = ytdl.createAgent(cookies);
+        }
+    } catch (err) {
+        console.error("Error parsing cookies:", err);
+    }
 
-    // We ask RapidAPI for the video details
-    const response = await fetch(`https://youtube-media-downloader.p.rapidapi.com/v2/video/details?videoId=${videoId}`, options);
+    // 3. Validate URL
+    if (!ytdl.validateURL(url)) {
+        return res.status(400).json({ success: false, error: 'Invalid YouTube URL' });
+    }
+
+    // 4. Get Video Info (Passing the Agent/Cookies)
+    // This is the step that usually fails without cookies
+    const info = await ytdl.getInfo(url, { agent });
     
-    if (!response.ok) {
-        throw new Error(`RapidAPI Error: ${response.status}`);
-    }
+    // 5. Filter for Video+Audio formats
+    const formats = ytdl.filterFormats(info.formats, 'videoandaudio')
+      .map(format => ({
+        quality: format.qualityLabel || format.quality,
+        url: format.url,
+        mimeType: format.mimeType,
+        filesize: format.contentLength,
+        container: format.container
+      }))
+      .filter(format => format.quality) // Remove unknown qualities
+      .slice(0, 10); // Return top 10 options
 
-    const data = await response.json();
-
-    // Map RapidAPI response to your Frontend's expected format
-    // Note: The API returns data.videos (array) and data.audios (array)
-    // We combine them for your frontend
-    const formats = [];
-    
-    if (data.videos && data.videos.items) {
-        data.videos.items.forEach(v => {
-            formats.push({
-                quality: v.quality,
-                url: v.url,
-                mimeType: 'video/mp4',
-                filesize: v.sizeText,
-                container: 'mp4',
-                hasAudio: v.hasAudio
-            });
-        });
-    }
-
-    if (data.audios && data.audios.items) {
-        data.audios.items.forEach(a => {
-            formats.push({
-                quality: 'Audio Only',
-                url: a.url,
-                mimeType: 'audio/mp3',
-                filesize: a.sizeText,
-                container: 'mp3'
-            });
-        });
-    }
-
+    // 6. Send success response
     return res.status(200).json({
       success: true,
-      title: data.title,
-      thumbnail: data.thumbnails ? data.thumbnails[data.thumbnails.length - 1].url : '',
+      title: info.videoDetails.title,
+      thumbnail: info.videoDetails.thumbnails.pop().url, // Best quality thumbnail
       formats: formats
     });
 
   } catch (error) {
-    console.error(error);
+    console.error('Download error:', error);
+    
+    // Check for specific YouTube errors
+    let userMessage = 'Failed to process video';
+    if (error.message.includes('410')) userMessage = 'Video unavailable (410)';
+    if (error.message.includes('Sign in')) userMessage = 'Server blocked by YouTube. Cookies expired.';
+
     return res.status(500).json({ 
-        success: false, 
-        error: error.message 
+      success: false,
+      error: userMessage,
+      debug: error.message 
     });
   }
 }
