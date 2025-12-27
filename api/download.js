@@ -1,6 +1,5 @@
 // api/download.js
 export default async function handler(req, res) {
-  // 1. CORS Headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -10,7 +9,7 @@ export default async function handler(req, res) {
   const { url } = req.query;
   if (!url) return res.status(400).json({ error: 'URL required' });
 
-  // 2. Extract Video ID (Crucial step for this API)
+  // Regex to find ID
   const getVideoId = (link) => {
     const regex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
     const match = link.match(regex);
@@ -18,7 +17,7 @@ export default async function handler(req, res) {
   };
 
   const videoId = getVideoId(url);
-  if (!videoId) return res.status(400).json({ error: 'Invalid YouTube URL. Could not extract ID.' });
+  if (!videoId) return res.status(400).json({ error: 'Invalid YouTube URL' });
 
   try {
     const options = {
@@ -29,46 +28,61 @@ export default async function handler(req, res) {
       }
     };
 
-    // 3. The API Call (Using the endpoint you found)
+    // We use the ID endpoint
     const apiUrl = `https://all-media-downloader4.p.rapidapi.com/yt/v5/download.php?id=${videoId}`;
     
-    console.log("Fetching:", apiUrl); // Debug log
     const response = await fetch(apiUrl, options);
     
     if (!response.ok) {
        const err = await response.text();
-       throw new Error(`RapidAPI Error: ${response.status} - ${err}`);
+       throw new Error(`API Error: ${response.status} - ${err}`);
     }
 
     const data = await response.json();
-    console.log("RapidAPI Data:", JSON.stringify(data).substring(0, 200) + "..."); // Log start of data
-
-    // 4. Adapt the data for your Frontend
-    // APIs like this usually return a list of formats directly or in a 'data' object
-    let formats = [];
     
-    // Check if 'formats' exists directly
-    const rawFormats = data.formats || data.links || (data.data ? data.data.formats : []);
+    // --- ROBUST PARSING LOGIC ---
+    let formats = [];
 
-    if (Array.isArray(rawFormats)) {
-        formats = rawFormats.map(f => ({
-            quality: f.quality || f.format_note || 'Unknown',
+    // 1. Look for array in common places
+    const rawList = 
+        data.formats || 
+        data.links || 
+        data.videos || 
+        (data.data ? data.data.formats : []) || 
+        (data.data ? data.data.videos : []) ||
+        [];
+
+    if (Array.isArray(rawList) && rawList.length > 0) {
+        formats = rawList.map(f => ({
+            quality: f.quality || f.format_note || 'Video',
             url: f.url,
-            mimeType: 'video/mp4', // Defaulting since simple APIs might not send mime
+            mimeType: 'video/mp4',
             container: f.ext || 'mp4',
-            hasAudio: true, // Assuming true for simple downloaders
-            filesize: f.filesize ? (f.filesize / 1024 / 1024).toFixed(2) + ' MB' : 'Unknown'
+            filesize: f.filesize ? (f.filesize / 1024 / 1024).toFixed(2) + ' MB' : ''
         }));
-    } else if (data.url) {
-        // Fallback: Single URL response
-        formats.push({
-            quality: 'High',
-            url: data.url,
-            container: 'mp4'
+    } 
+    // 2. Look for single url in common places
+    else {
+        const directUrl = data.url || data.download_url || (data.data ? data.data.url : null);
+        if (directUrl) {
+            formats.push({
+                quality: 'High Quality',
+                url: directUrl,
+                mimeType: 'video/mp4',
+                container: 'mp4'
+            });
+        }
+    }
+
+    // If we still found nothing, send an error so the frontend knows
+    if (formats.length === 0) {
+        return res.status(500).json({ 
+            success: false, 
+            error: "No download links found for this video. (Copyright or API limit)",
+            debug: JSON.stringify(data) // Sends raw data to console for debugging
         });
     }
 
-    // 5. Send to Frontend
     return res.status(200).json({
       success: true,
       title: data.title || "YouTube Video",
@@ -78,9 +92,6 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error(error);
-    return res.status(500).json({ 
-        success: false, 
-        error: error.message || "Failed to fetch video"
-    });
+    return res.status(500).json({ success: false, error: error.message });
   }
 }
