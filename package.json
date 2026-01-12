@@ -1,10 +1,9 @@
 {
-  "name": "video-downloader-api",
+  "name": "yxthumb-api",
   "version": "1.0.0",
-  "description": "Video downloader API for YouTube and Twitter",
+  "description": "Video downloader API for YouTube",
   "type": "module",
   "dependencies": {
-    "express": "^4.21.0",
-    "@distube/ytdl-core": "^4.16.0"
+    "ytdl-core": "^4.11.5"
   }
 }
