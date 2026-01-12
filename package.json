@@ -1,9 +1,6 @@
 {
   "name": "yxthumb-api",
   "version": "1.0.0",
-  "description": "Video downloader API for YouTube",
-  "type": "module",
-  "dependencies": {
-    "ytdl-core": "^4.11.5"
-  }
+  "description": "Video downloader API",
+  "type": "module"
 }
