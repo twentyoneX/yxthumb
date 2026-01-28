@@ -1,142 +1,101 @@
-# api/download.py - yt-dlp video downloader API
 from http.server import BaseHTTPRequestHandler
-from urllib.parse import parse_qs, urlparse
-import json
+from urllib.parse import urlparse, parse_qs
 import yt_dlp
+import json
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        # Parse query parameters
-        parsed_path = urlparse(self.path)
-        params = parse_qs(parsed_path.query)
-        
         # Enable CORS
         self.send_response(200)
         self.send_header('Content-type', 'application/json')
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
-        
-        # Validate URL parameter
-        if 'url' not in params:
-            error_response = {
-                'success': False,
-                'error': 'URL parameter is required'
-            }
-            self.wfile.write(json.dumps(error_response).encode())
-            return
-        
-        video_url = params['url'][0]
-        video_type = params.get('type', ['youtube'])[0]
-        
+
         try:
-            # Configure yt-dlp options
+            # Parse query parameters
+            query_components = parse_qs(urlparse(self.path).query)
+            video_url = query_components.get('url', [None])[0]
+            
+            if not video_url:
+                error_response = json.dumps({
+                    'success': False,
+                    'message': 'Missing URL parameter'
+                })
+                self.wfile.write(error_response.encode())
+                return
+
+            # yt-dlp options for best compatibility
             ydl_opts = {
+                'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
                 'quiet': True,
                 'no_warnings': True,
                 'extract_flat': False,
-                'format': 'best',
+                'nocheckcertificate': True,
+                'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             }
-            
-            # Extract video info
+
+            # Extract video information
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(video_url, download=False)
                 
-                # Get available formats with both video and audio
-                formats_list = []
+                # Get available formats
+                formats = []
                 seen_qualities = set()
                 
                 if 'formats' in info:
                     for f in info['formats']:
-                        # Get quality label
-                        quality = f.get('format_note', f.get('quality', 'unknown'))
-                        height = f.get('height', 0)
-                        
-                        # Create quality label
-                        if height:
-                            quality_label = f"{height}p"
-                        else:
-                            quality_label = str(quality)
-                        
-                        # Only include formats with both video and audio, and unique qualities
-                        if (f.get('vcodec') != 'none' and 
-                            f.get('acodec') != 'none' and 
-                            quality_label not in seen_qualities and
-                            f.get('url')):
-                            
-                            seen_qualities.add(quality_label)
-                            
-                            formats_list.append({
-                                'quality': quality_label,
-                                'resolution': f.get('resolution', 'unknown'),
-                                'ext': f.get('ext', 'mp4'),
-                                'filesize': f.get('filesize') or f.get('filesize_approx', 0),
-                                'url': f.get('url', ''),
-                                'format_id': f.get('format_id', ''),
-                                'fps': f.get('fps', 30),
-                                'vcodec': f.get('vcodec', 'unknown'),
-                                'acodec': f.get('acodec', 'unknown')
-                            })
+                        # Only include video+audio or video formats
+                        if f.get('vcodec') != 'none' and f.get('ext') in ['mp4', 'webm']:
+                            height = f.get('height', 0)
+                            if height and height not in seen_qualities and height >= 360:
+                                quality_label = f"{height}p"
+                                formats.append({
+                                    'quality': quality_label,
+                                    'url': f.get('url', ''),
+                                    'ext': f.get('ext', 'mp4'),
+                                    'filesize': f.get('filesize', 0)
+                                })
+                                seen_qualities.add(height)
                 
-                # Sort by quality (highest resolution first)
-                formats_list = sorted(
-                    formats_list, 
-                    key=lambda x: (
-                        int(x['quality'].replace('p', '')) if x['quality'].endswith('p') else 0
-                    ), 
-                    reverse=True
-                )[:6]  # Limit to top 6 formats
+                # Sort by quality (highest first)
+                formats.sort(key=lambda x: int(x['quality'].replace('p', '')), reverse=True)
                 
-                # Get best thumbnail
-                thumbnail = info.get('thumbnail', '')
-                if 'thumbnails' in info and info['thumbnails']:
-                    # Get the highest quality thumbnail
-                    thumbnail = info['thumbnails'][-1].get('url', thumbnail)
+                # Limit to top 5 formats
+                formats = formats[:5]
                 
-                # Prepare successful response
+                # If no formats found, add a fallback
+                if not formats:
+                    formats.append({
+                        'quality': 'Best Available',
+                        'url': info.get('url', ''),
+                        'ext': 'mp4',
+                        'filesize': 0
+                    })
+
                 response = {
                     'success': True,
-                    'title': info.get('title', 'Unknown Title'),
-                    'thumbnail': thumbnail,
+                    'title': info.get('title', 'Unknown'),
+                    'thumbnail': info.get('thumbnail', ''),
                     'duration': info.get('duration', 0),
                     'uploader': info.get('uploader', 'Unknown'),
-                    'view_count': info.get('view_count', 0),
-                    'upload_date': info.get('upload_date', ''),
-                    'description': info.get('description', '')[:200] + '...' if info.get('description') else '',
-                    'formats': formats_list
+                    'formats': formats
                 }
-                
-                self.wfile.write(json.dumps(response).encode())
-                
-        except yt_dlp.utils.DownloadError as e:
-            error_response = {
-                'success': False,
-                'error': 'Download error',
-                'message': 'Video unavailable or restricted. It may be private, age-restricted, or removed.'
-            }
-            self.wfile.write(json.dumps(error_response).encode())
-            
-        except yt_dlp.utils.ExtractorError as e:
-            error_response = {
-                'success': False,
-                'error': 'Extraction error',
-                'message': 'Could not extract video information. Please check the URL.'
-            }
-            self.wfile.write(json.dumps(error_response).encode())
-            
+
+            self.wfile.write(json.dumps(response).encode())
+
         except Exception as e:
-            error_response = {
+            error_response = json.dumps({
                 'success': False,
-                'error': 'Failed to process video',
-                'message': str(e)
-            }
-            self.wfile.write(json.dumps(error_response).encode())
-    
+                'message': f'Error: {str(e)}'
+            })
+            self.wfile.write(error_response.encode())
+
     def do_OPTIONS(self):
         # Handle CORS preflight
         self.send_response(200)
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
